@@ -1,0 +1,23 @@
+[
+  {
+    "id": "eval_001",
+    "question": "What is the timeout threshold for background webhook retries in FillFlow?",
+    "expected_context": "Webhook retries are configured with exponential backoff capping at a 30-second timeout threshold.",
+    "document": "In FillFlow, all external notifications and CRM sync tasks are executed via async Celery queues. Webhook retries are configured with exponential backoff capping at a 30-second timeout threshold before escalating to an incident alert.",
+    "doc_id": "doc_arch_01"
+  },
+  {
+    "id": "eval_002",
+    "question": "Which database engine is used for semantic vector indexing?",
+    "expected_context": "PostgreSQL with pgvector is utilized as the primary transactional and vector retrieval store.",
+    "document": "The data persistence layer utilizes PostgreSQL with pgvector as the primary transactional and vector retrieval store, leveraging HNSW indexes for sub-10ms similarity queries.",
+    "doc_id": "doc_arch_02"
+  },
+  {
+    "id": "eval_003",
+    "question": "How does the system prevent hallucinated claims in enterprise replies?",
+    "expected_context": "A human-in-the-loop review queue intercepts all responses with confidence below 0.85.",
+    "document": "To eliminate hallucination risks on enterprise accounts, a human-in-the-loop review queue intercepts all responses with confidence below 0.85 before any outbound message is transmitted.",
+    "doc_id": "doc_arch_03"
+  }
+]
