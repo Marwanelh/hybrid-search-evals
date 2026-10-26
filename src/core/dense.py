@@ -1,46 +1,50 @@
-import math
 import hashlib
-from typing import List, Tuple
+import math
+import re
+
 from .chunker import TextChunk
 
-def generate_mock_embedding(text: str, dimensions: int = 64) -> List[float]:
-    """
-    Deterministic pseudo-embedding for testing and standalone execution
-    without requiring external paid API keys.
-    """
+
+def _features(text: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return tokens + [f"{left}_{right}" for left, right in zip(tokens, tokens[1:])]
+
+
+def hashed_feature_vector(text: str, dimensions: int = 256) -> list[float]:
+    """Create a deterministic local feature vector; this is not a learned embedding."""
     vector = [0.0] * dimensions
-    words = text.lower().split()
-    for word in words:
-        h = int(hashlib.md5(word.encode()).hexdigest(), 16)
-        for i in range(dimensions):
-            vector[i] += ((h >> (i % 32)) & 0xFF) / 255.0 - 0.5
-            
-    norm = math.sqrt(sum(x * x for x in vector)) or 1.0
-    return [round(x / norm, 4) for x in vector]
+    for feature in _features(text):
+        digest = hashlib.sha256(feature.encode()).digest()
+        index = int.from_bytes(digest[:4], "big") % dimensions
+        sign = 1.0 if digest[4] & 1 else -1.0
+        vector[index] += sign
+    norm = math.sqrt(sum(value * value for value in vector))
+    return [value / norm for value in vector] if norm else vector
 
-def cosine_similarity(v1: List[float], v2: List[float]) -> float:
-    dot = sum(a * b for a, b in zip(v1, v2))
-    norm_a = math.sqrt(sum(a * a for a in v1))
-    norm_b = math.sqrt(sum(b * b for b in v2))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
-class DenseVectorStore:
-    def __init__(self, dimensions: int = 64):
+def cosine_similarity(left: list[float], right: list[float]) -> float:
+    return sum(a * b for a, b in zip(left, right))
+
+
+class HashedFeatureIndex:
+    def __init__(self, dimensions: int = 256) -> None:
         self.dimensions = dimensions
-        self.index: List[Tuple[TextChunk, List[float]]] = []
+        self.index: list[tuple[TextChunk, list[float]]] = []
 
-    def add_chunks(self, chunks: List[TextChunk]) -> None:
-        for chunk in chunks:
-            emb = generate_mock_embedding(chunk.text, self.dimensions)
-            self.index.append((chunk, emb))
+    def add_chunks(self, chunks: list[TextChunk]) -> None:
+        self.index.extend(
+            (chunk, hashed_feature_vector(chunk.text, self.dimensions))
+            for chunk in chunks
+        )
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[TextChunk, float]]:
-        query_vec = generate_mock_embedding(query, self.dimensions)
-        scored = []
-        for chunk, emb in self.index:
-            score = cosine_similarity(query_vec, emb)
-            scored.append((chunk, score))
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:top_k]
+    def search(self, query: str, top_k: int = 5) -> list[tuple[TextChunk, float]]:
+        query_vector = hashed_feature_vector(query, self.dimensions)
+        scored = [
+            (chunk, cosine_similarity(query_vector, vector))
+            for chunk, vector in self.index
+        ]
+        return sorted(
+            ((chunk, score) for chunk, score in scored if score > 0),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:top_k]

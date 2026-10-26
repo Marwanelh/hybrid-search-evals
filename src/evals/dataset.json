@@ -1,23 +1,22 @@
 [
   {
-    "id": "eval_001",
-    "question": "What is the timeout threshold for background webhook retries in FillFlow?",
-    "expected_context": "Webhook retries are configured with exponential backoff capping at a 30-second timeout threshold.",
-    "document": "In FillFlow, all external notifications and CRM sync tasks are executed via async Celery queues. Webhook retries are configured with exponential backoff capping at a 30-second timeout threshold before escalating to an incident alert.",
-    "doc_id": "doc_arch_01"
+    "question": "When are monthly invoices generated?",
+    "document": "Monthly invoices are generated on the first calendar day and sent to the billing contact.",
+    "doc_id": "billing_schedule"
   },
   {
-    "id": "eval_002",
-    "question": "Which database engine is used for semantic vector indexing?",
-    "expected_context": "PostgreSQL with pgvector is utilized as the primary transactional and vector retrieval store.",
-    "document": "The data persistence layer utilizes PostgreSQL with pgvector as the primary transactional and vector retrieval store, leveraging HNSW indexes for sub-10ms similarity queries.",
-    "doc_id": "doc_arch_02"
+    "question": "How long are audit records retained?",
+    "document": "Audit records are retained for seven years and can be exported by an administrator.",
+    "doc_id": "audit_retention"
   },
   {
-    "id": "eval_003",
-    "question": "How does the system prevent hallucinated claims in enterprise replies?",
-    "expected_context": "A human-in-the-loop review queue intercepts all responses with confidence below 0.85.",
-    "document": "To eliminate hallucination risks on enterprise accounts, a human-in-the-loop review queue intercepts all responses with confidence below 0.85 before any outbound message is transmitted.",
-    "doc_id": "doc_arch_03"
+    "question": "Which status code indicates rate limiting?",
+    "document": "The API returns HTTP 429 when a client exceeds its assigned request limit.",
+    "doc_id": "api_rate_limit"
+  },
+  {
+    "question": "What is required before publishing a workflow?",
+    "document": "A workflow must pass validation and receive reviewer approval before it can be published.",
+    "doc_id": "workflow_review"
   }
 ]
