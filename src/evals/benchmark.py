@@ -1,49 +1,38 @@
 import json
 from pathlib import Path
-from typing import Dict, Any, List
-from ..core.engine import HybridRAGEngine
+from typing import Any
 
-class RAGEvaluationRunner:
-    """
-    Automated evaluation harness calculating retrieval precision, 
-    faithfulness, and ground-truth hit rates across modes (Dense vs Sparse vs Hybrid).
-    """
-    def __init__(self, dataset_path: str = None):
-        if not dataset_path:
-            dataset_path = str(Path(__file__).parent / "dataset.json")
-        with open(dataset_path, "r", encoding="utf-8") as f:
-            self.test_cases = json.load(f)
+from ..core.engine import HybridSearchEngine
 
-    def run_benchmark(self) -> Dict[str, Any]:
-        results = {"dense": [], "sparse": [], "hybrid": []}
-        
-        # Initialize engine and index documents
-        engine = HybridRAGEngine()
-        for tc in self.test_cases:
-            engine.index_document(tc["doc_id"], tc["document"])
 
-        for mode in ["dense", "sparse", "hybrid"]:
+class RetrievalEvaluationRunner:
+    def __init__(self, dataset_path: str | None = None) -> None:
+        path = Path(dataset_path) if dataset_path else Path(__file__).with_name("dataset.json")
+        self.cases: list[dict[str, str]] = json.loads(path.read_text(encoding="utf-8"))
+        if not self.cases:
+            raise ValueError("evaluation dataset must not be empty")
+
+    def run(self, top_k: int = 2) -> dict[str, Any]:
+        engine = HybridSearchEngine()
+        for case in self.cases:
+            engine.index_document(case["doc_id"], case["document"])
+
+        metrics = {}
+        for mode in ("features", "bm25", "hybrid"):
+            reciprocal_ranks = []
             hits = 0
-            latencies = []
-            for tc in self.test_cases:
-                resp = engine.query(tc["question"], mode=mode, top_k=2)
-                latencies.append(resp.latency_ms)
-                
-                # Check if correct document was retrieved in top-2 citations
-                retrieved_docs = [c.doc_id for c in resp.citations]
-                if tc["doc_id"] in retrieved_docs:
+            for case in self.cases:
+                response = engine.search(case["question"], mode=mode, top_k=top_k)
+                ids = [result.doc_id for result in response.results]
+                if case["doc_id"] in ids:
+                    rank = ids.index(case["doc_id"]) + 1
                     hits += 1
-
-            recall_at_2 = round(hits / len(self.test_cases), 3)
-            avg_latency = round(sum(latencies) / len(latencies), 2)
-            results[mode] = {
-                "recall_at_2": recall_at_2,
-                "hit_rate_pct": round(recall_at_2 * 100, 1),
-                "avg_latency_ms": avg_latency,
-                "total_queries": len(self.test_cases)
+                    reciprocal_ranks.append(1 / rank)
+                else:
+                    reciprocal_ranks.append(0)
+            metrics[mode] = {
+                f"recall_at_{top_k}": round(hits / len(self.cases), 3),
+                "mean_reciprocal_rank": round(sum(reciprocal_ranks) / len(self.cases), 3),
+                "queries": len(self.cases),
             }
-
-        return {
-            "evaluation_metrics": results,
-            "conclusion": "Hybrid mode achieved highest retrieval robustness with balanced latency."
-        }
+        return {"dataset": "synthetic", "top_k": top_k, "metrics": metrics}

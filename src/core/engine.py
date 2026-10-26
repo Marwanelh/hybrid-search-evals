@@ -1,78 +1,78 @@
-import time
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from typing import Literal
 
-from .chunker import RecursiveSemanticChunker, TextChunk
-from .dense import DenseVectorStore
-from .sparse import BM25Indexer
-from .reranker import ReciprocalRankFusionReranker
+from pydantic import BaseModel
 
-class Citation(BaseModel):
+from .chunker import SlidingWindowChunker
+from .dense import HashedFeatureIndex
+from .reranker import ReciprocalRankFusion
+from .sparse import BM25Index
+
+
+SearchMode = Literal["features", "bm25", "hybrid"]
+
+
+class SearchResult(BaseModel):
     chunk_id: str
     doc_id: str
     snippet: str
-    relevance_score: float
+    score: float
 
-class RAGResponse(BaseModel):
+
+class SearchResponse(BaseModel):
     query: str
-    answer: str
-    citations: List[Citation]
-    retrieval_mode: str
-    latency_ms: float
+    mode: SearchMode
+    results: list[SearchResult]
 
-class HybridRAGEngine:
-    def __init__(self):
-        self.chunker = RecursiveSemanticChunker()
-        self.dense_store = DenseVectorStore()
-        self.sparse_indexer = BM25Indexer()
-        self.reranker = ReciprocalRankFusionReranker()
-        self.indexed_docs: Dict[str, str] = {}
 
-    def index_document(self, doc_id: str, content: str, metadata: Dict[str, Any] = None) -> int:
+class HybridSearchEngine:
+    def __init__(self) -> None:
+        self.chunker = SlidingWindowChunker()
+        self.feature_index = HashedFeatureIndex()
+        self.bm25_index = BM25Index()
+        self.fusion = ReciprocalRankFusion()
+        self.document_ids: set[str] = set()
+
+    def index_document(
+        self, doc_id: str, content: str, metadata: dict | None = None
+    ) -> int:
+        if doc_id in self.document_ids:
+            raise ValueError(f"document '{doc_id}' is already indexed")
         chunks = self.chunker.chunk_document(doc_id, content, metadata)
-        self.dense_store.add_chunks(chunks)
-        self.sparse_indexer.index_chunks(chunks)
-        self.indexed_docs[doc_id] = content
+        self.feature_index.add_chunks(chunks)
+        self.bm25_index.add_chunks(chunks)
+        self.document_ids.add(doc_id)
         return len(chunks)
 
-    def query(self, question: str, mode: str = "hybrid", top_k: int = 3) -> RAGResponse:
-        start_time = time.time()
-        
-        if mode == "dense":
-            ranked = self.dense_store.search(question, top_k=top_k)
-        elif mode == "sparse":
-            ranked = self.sparse_indexer.search(question, top_k=top_k)
-        else:  # hybrid
-            dense_res = self.dense_store.search(question, top_k=top_k * 2)
-            sparse_res = self.sparse_indexer.search(question, top_k=top_k * 2)
-            ranked = self.reranker.rerank(dense_res, sparse_res, top_n=top_k)
+    def search(
+        self, query: str, mode: SearchMode = "hybrid", top_k: int = 3
+    ) -> SearchResponse:
+        if not query.strip():
+            raise ValueError("query must not be empty")
+        if not 1 <= top_k <= 20:
+            raise ValueError("top_k must be between 1 and 20")
 
-        citations = [
-            Citation(
-                chunk_id=c.chunk_id,
-                doc_id=c.doc_id,
-                snippet=c.text[:140] + ("..." if len(c.text) > 140 else ""),
-                relevance_score=score
-            )
-            for c, score in ranked
-        ]
-
-        # Synthesize answer strictly referencing retrieved chunks
-        if not ranked:
-            synthesized_answer = "No matching documentation found with sufficient confidence."
+        if mode == "features":
+            ranked = self.feature_index.search(query, top_k)
+        elif mode == "bm25":
+            ranked = self.bm25_index.search(query, top_k)
         else:
-            primary_chunk = ranked[0][0]
-            synthesized_answer = (
-                f"Based on [{primary_chunk.chunk_id}], {primary_chunk.text.split('.')[0]}. "
-                f"Verified across {len(citations)} retrieved source passages."
+            candidates = max(top_k * 3, 10)
+            ranked = self.fusion.merge(
+                self.feature_index.search(query, candidates),
+                self.bm25_index.search(query, candidates),
+                top_k=top_k,
             )
 
-        latency = round((time.time() - start_time) * 1000, 2)
-
-        return RAGResponse(
-            query=question,
-            answer=synthesized_answer,
-            citations=citations,
-            retrieval_mode=mode,
-            latency_ms=latency
+        return SearchResponse(
+            query=query,
+            mode=mode,
+            results=[
+                SearchResult(
+                    chunk_id=chunk.chunk_id,
+                    doc_id=chunk.doc_id,
+                    snippet=chunk.text[:240],
+                    score=round(score, 6),
+                )
+                for chunk, score in ranked
+            ],
         )
